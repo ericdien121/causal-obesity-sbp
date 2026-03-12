@@ -1,6 +1,4 @@
 # Causal Effect of Obesity on Systolic Blood Pressure
-
-UCLA STATS 160C Final Project  
 Author: Eric Dien
 
 ## Project Overview
