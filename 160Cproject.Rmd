@@ -1,0 +1,186 @@
+---
+title: "160cProject"
+author: "Eric Dien"
+date: "2026-02-25"
+output: html_document
+---
+
+
+```{r}
+library(tidyverse)
+library(data.table)
+library(MatchIt)
+library(survey)
+library(ggdag)
+
+
+df <- fread("SATrainF25.csv") %>%
+  mutate(
+    obese = as.numeric(BMI.Category == "Obese"),
+    sex = factor(sex),
+    AGE.Category = factor(AGE.Category),
+    Alcoholic.Status = factor(Alcoholic.Status),
+    Smoking.Status = factor(Smoking.Status)
+  )
+
+cat("Treatment distribution:\n"); table(df$obese)
+
+df %>% group_by(obese) %>%
+  summarise(
+    n = n(),
+    mean_SBP = mean(SBP, na.rm = TRUE),
+    sd_SBP = sd(SBP, na.rm = TRUE)
+  ) %>% print()
+
+# MODEL A with waistline
+
+modA_ols <- lm(SBP ~ obese + sex + AGE.Category + Alcoholic.Status +
+                 Smoking.Status + waistline + tot_chole + triglyceride, df)
+summary(modA_ols)
+
+matchA <- matchit(obese ~ sex + AGE.Category + Alcoholic.Status +
+                    Smoking.Status + waistline + tot_chole + triglyceride,
+                  data = df, method = "nearest")
+A_data <- match.data(matchA)
+modA_psm <- lm(SBP ~ obese, A_data)
+summary(modA_psm)
+
+psA <- glm(obese ~ sex + AGE.Category + Alcoholic.Status +
+             Smoking.Status + waistline + tot_chole + triglyceride,
+           df, family = binomial())
+df$wA <- ifelse(df$obese == 1, 1/predict(psA, type = "response"),
+                              1/(1 - predict(psA, type = "response")))
+df$wA <- pmin(pmax(df$wA, quantile(df$wA, .01)), quantile(df$wA, .99))
+modA_ipw <- svyglm(SBP ~ obese, svydesign(ids = ~1, weights = ~wA, data = df))
+summary(modA_ipw)
+
+png("loveplot_with_waistline.png", 800, 500, res = 120)
+plot(summary(matchA), abs = TRUE, main = "Balance: Model A")
+dev.off()
+
+# MODEL B without Waistline 
+modB_ols <- lm(SBP ~ obese + sex + AGE.Category + Alcoholic.Status +
+                 Smoking.Status + tot_chole + triglyceride, df)
+summary(modB_ols)
+
+matchB <- matchit(obese ~ sex + AGE.Category + Alcoholic.Status +
+                    Smoking.Status + tot_chole + triglyceride,
+                  df, method = "nearest")
+B_data <- match.data(matchB)
+modB_psm <- lm(SBP ~ obese, B_data)
+summary(modB_psm)
+
+psB <- glm(obese ~ sex + AGE.Category + Alcoholic.Status +
+             Smoking.Status + tot_chole + triglyceride,
+           df, family = binomial())
+df$wB <- ifelse(df$obese == 1, 1/predict(psB, type = "response"),
+                              1/(1 - predict(psB, type = "response")))
+df$wB <- pmin(pmax(df$wB, quantile(df$wB, .01)), quantile(df$wB, .99))
+modB_ipw <- svyglm(SBP ~ obese, svydesign(ids = ~1, weights = ~wB, data = df))
+summary(modB_ipw)
+
+png("loveplot_no_waistline.png", 800, 500, res = 120)
+plot(summary(matchB), abs = TRUE, main = "Balance: Model B")
+dev.off()
+
+dag <- dagify(
+  SBP ~ Obesity + Waistline + Age + Sex + Smoking + Alcohol + Cholesterol + Triglycerides,
+  Waistline ~ Obesity + Age + Sex,
+  Obesity ~ Age + Sex + Smoking + Alcohol + Cholesterol + Triglycerides,
+  
+  coords = list(
+    x = c(Obesity = 0,   Waistline = 1.5,  SBP = 3,
+          Age = -1,      Sex = -1,          Smoking = -1.5,
+          Alcohol = 0,   Cholesterol = 1.5, Triglycerides = 3),
+    y = c(Obesity = 0,   Waistline = 0,     SBP = 0,
+          Age = 1.2,     Sex = -1.2,        Smoking = 0,
+          Alcohol = 2,   Cholesterol = 2,   Triglycerides = 2)
+  ),
+  
+  exposure = "Obesity",
+  outcome = "SBP"
+)
+
+ggdag_status(dag, use_labels = "name", text = FALSE) +
+  theme_dag() +
+  scale_color_manual(
+    values = c("exposure" = "blue", 
+               "outcome"  = "pink"),
+    labels = c("exposure" = "Treatment", 
+               "outcome"  = "Outcome"),
+  ) +
+  guides(color = guide_legend(override.aes = list(size = 5))) +
+  labs(title = "DAG: Causal Effect of Obesity on SBP") +
+  theme(
+    plot.title = element_text(size = 13, face = "bold")
+  )
+
+
+#CATE BY AGE FOR MODEL B 
+
+cate <- df %>% group_by(AGE.Category) %>% group_map(~{
+  fit <- lm(SBP ~ obese + sex + Alcoholic.Status + Smoking.Status +
+              tot_chole + triglyceride, data = .x)
+  tibble(
+    AGE.Category = .y$AGE.Category,
+    estimate = coef(fit)["obese"],
+    se = summary(fit)$coefficients["obese","Std. Error"],
+    pval = summary(fit)$coefficients["obese","Pr(>|t|)"]
+  )
+}) %>% bind_rows()
+
+cate
+
+ggsave("cate_by_age.png",
+       cate %>%
+         mutate(lower = estimate - 1.96*se,
+                upper = estimate + 1.96*se) %>%
+         ggplot(aes(AGE.Category, estimate)) +
+         geom_point() +
+         geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.1) +
+         geom_hline(yintercept = 0, linetype = "dashed") +
+         theme_minimal())
+
+
+
+b <- coef(modB_psm)["obese"]
+se <- summary(modB_psm)$coefficients["obese","Std. Error"]
+d <- b / summary(modB_psm)$sigma
+E <- d + sqrt(d^2 + 1)
+
+cat("\nE-value:", E, "\n")
+
+
+
+results <- tibble(
+  Model = rep(c("A","A","A","B","B","B"), each = 1),
+  Method = rep(c("OLS","PSM","IPW"), 2),
+  Estimate = c(coef(modA_ols)["obese"],
+               coef(modA_psm)["obese"],
+               coef(modA_ipw)["obese"],
+               coef(modB_ols)["obese"],
+               coef(modB_psm)["obese"],
+               coef(modB_ipw)["obese"])
+)
+
+results
+
+
+total_effect  <- coef(modB_psm)["obese"]
+direct_effect <- coef(modA_psm)["obese"]
+indirect_effect <- total_effect - direct_effect
+cat("Total:", total_effect, "| Direct:", direct_effect, 
+    "| Indirect (via waistline):", indirect_effect, "\n")
+
+se_psm <- summary(modB_psm)$coefficients["obese","Std. Error"]
+d_ci   <- (b - 1.96 * se_psm) / summary(modB_psm)$sigma
+E_ci   <- d_ci + sqrt(d_ci^2 + 1)
+cat("E-value CI lower:", E_ci, "\n")
+
+summary(matchA)
+summary(matchB)
+
+mod_interact <- lm(SBP ~ obese * AGE.Category + sex + Alcoholic.Status +
+                     Smoking.Status + tot_chole + triglyceride, df)
+summary(mod_interact)$coefficients["obese:AGE.CategoryYOUNG", ]
+```
