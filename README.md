@@ -81,8 +81,6 @@ The analysis produces:
 * Age-based treatment effect heterogeneity
 * Sensitivity analysis results using the E-value
 
-* 
-
 # Causal Effect of Obesity on Systolic Blood Pressure
 
 Prepared by Eric Dien
@@ -165,3 +163,10 @@ The analysis produces:
 * Comparison of OLS, PSM, and IPW estimates
 * Age-based treatment effect heterogeneity
 * Sensitivity analysis results using the E-value
+
+## Skills Demonstrated
+- Causal inference
+- Propensity score methods
+- Observational data analysis
+- R statistical programming
+- Sensitivity analysis
