@@ -1,7 +1,5 @@
 # Causal Effect of Obesity on Systolic Blood Pressure
 
-Prepared by Eric Dien
-
 ## Project Overview
 
 This project estimates the causal effect of obesity on systolic blood pressure (SBP) using observational health data from the NHIS Health Screening Dataset.
@@ -82,8 +80,9 @@ The analysis produces:
 * Sensitivity analysis results using the E-value
 
 ## Skills Demonstrated
-- Causal inference
-- Propensity score methods
-- Observational data analysis
-- R statistical programming
-- Sensitivity analysis
+
+* Causal inference
+* Propensity score methods
+* Observational data analysis
+* R statistical programming
+* Sensitivity analysis
